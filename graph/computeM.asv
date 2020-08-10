@@ -1,0 +1,64 @@
+function M = computeM(data,Kmatrix,options)
+
+[nSmp,nFea]= size(data);
+
+if(options.NN > nFea)
+    tol=1e-3; % regularlizer in case constrained fits are ill conditioned
+else
+    tol=1e-12;
+end
+    switch lower(options.NeighborMode)
+        case {lower('KNN')}
+            neighborhood = zeros(nSmp,options.NN);
+            for ii =1:nSmp
+                index00 = setdiff(1:size(Kmatrix,1),ii);
+                [sorted,index] = sort(Kmatrix(ii,index00),2,'descend');
+                neighborhood(ii,:) = index(index0(1:options.NN));
+            end
+            
+        case {lower('Supervised')}
+            if ~isfield(options,'gnd')
+                error('gnd should be provided!');
+            end
+            if length(options.gnd) ~= nSmp
+                error('gnd and data mismatch!');
+            end
+            if ~isfield(options,'bEigs')
+                options.bEigs = 0;
+            end
+
+            Label = unique(options.gnd);
+            nLabel = length(Label);
+            neighborhood = zeros(nSmp,options.NN);
+            for idx=1:nLabel
+                classIdx = find(options.gnd==Label(idx));
+                if options.NN >= length(classIdx)
+                    error('k is too large!');
+                end
+                [sorted,index] = sort(Kmatrix,2,'descend');
+                neighborhood(classIdx,:) = classIdx(index(:,2:(1+options.NN)));
+            end
+        otherwise
+            error('NeighborMode does not exist!');
+    end
+
+    W = zeros(options.NN,nSmp);
+    for ii=1:nSmp
+        z = data(neighborhood(ii,:),:)-repmat(data(ii,:),options.NN,1); % shift ith pt to origin
+        C = z*z';                                        % local covariance
+        C = C + eye(size(C))*tol*trace(C);                   % regularlization
+        W(:,ii) = C\ones(options.NN,1);                           % solve Cw=1
+        W(:,ii) = W(:,ii)/sum(W(:,ii));                  % enforce sum(w)=1
+    end
+
+    M = sparse(1:nSmp,1:nSmp,ones(1,nSmp),nSmp,nSmp,4*options.NN*nSmp);
+    for ii=1:nSmp
+        w = W(:,ii);
+        jj = neighborhood(ii,:)';
+        M(ii,jj) = M(ii,jj) - w';
+        M(jj,ii) = M(jj,ii) - w;
+        M(jj,jj) = M(jj,jj) + w*w';
+    end
+    M = max(M,M');
+    M = sparse(M);
+end
